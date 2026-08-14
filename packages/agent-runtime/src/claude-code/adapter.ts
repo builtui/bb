@@ -688,6 +688,7 @@ export function createClaudeCodeProviderAdapter(
       reasoningItemCounter: 0,
       selectedModelContextWindow: null,
       tasksById: new Map(),
+      suppressUnacceptedTurnStart: false,
       toolItemsByCallId: new Map(),
     }),
     // An idle thread with a running workflow must keep its task state — LRU
@@ -696,6 +697,7 @@ export function createClaudeCodeProviderAdapter(
       !hasOpenClaudeBackgroundTasks(state.tasksById) &&
       state.opaqueTaskIds.size === 0,
     onTurnStart: ({ events, state, threadId, turnId }) => {
+      state.suppressUnacceptedTurnStart = false;
       state.latestRequestContextTokens = undefined;
       state.latestProviderCheckpointId = undefined;
       state.pendingHardRateLimitRejection = undefined;
@@ -856,6 +858,7 @@ export function createClaudeCodeProviderAdapter(
       turnState,
       translateEvent: translateClaudeEvent,
       onSessionReplace: ({ command, state }) => {
+        state.suppressUnacceptedTurnStart = false;
         // Replacing the CLI session kills background tasks with it.
         const events = buildInterruptedClaudeTaskEvents({
           tasks: state.tasksById,

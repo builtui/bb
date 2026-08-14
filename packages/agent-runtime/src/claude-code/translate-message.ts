@@ -87,6 +87,8 @@ export interface ClaudeTurnState {
     | undefined;
   reasoningItemCounter: number;
   selectedModelContextWindow: number | null;
+  /** Blocks unaccepted provider-only turn starts after a terminal failure. */
+  suppressUnacceptedTurnStart: boolean;
   /**
    * Open context-compaction item for the turn it started in; status: null
    * (compaction finished) completes it. Cleared on use and guarded by turn id
@@ -445,6 +447,14 @@ function resolveClaudeActiveTurnId(
   return args.turnState.get({ threadId: args.context.threadId })?.currentTurnId;
 }
 
+function isClaudeProviderTurnStartSuppressed(state: ClaudeTurnState): boolean {
+  return (
+    state.suppressUnacceptedTurnStart &&
+    state.currentTurnId === undefined &&
+    state.pendingAcceptedUserMessages.length === 0
+  );
+}
+
 export function translateClaudeSdkMessage(
   args: TranslateClaudeSdkMessageArgs,
 ): ThreadEvent[] {
@@ -472,6 +482,9 @@ export function translateClaudeSdkMessage(
           turnId: fallbackTurnId,
         });
       }
+      if (isClaudeProviderTurnStartSuppressed(state)) {
+        return [];
+      }
       const turnId = args.ensureTurnStarted({
         events,
         state,
@@ -497,13 +510,16 @@ export function translateClaudeSdkMessage(
       }
       const apiRetryMessage = claudeApiRetryMessageSchema.safeParse(args.event);
       if (apiRetryMessage.success) {
+        const turnStartSuppressed = isClaudeProviderTurnStartSuppressed(state);
         const turnId =
           state.currentTurnId ??
-          args.ensureTurnStarted({
-            events,
-            state,
-            threadId,
-          });
+          (turnStartSuppressed
+            ? null
+            : args.ensureTurnStarted({
+                events,
+                state,
+                threadId,
+              }));
         events.push(
           buildClaudeProviderErrorEvent({
             detail: buildClaudeApiRetryDetail(apiRetryMessage.data),
@@ -522,6 +538,9 @@ export function translateClaudeSdkMessage(
         args.event,
       );
       if (statusMessage.success && statusMessage.data.status === "compacting") {
+        if (isClaudeProviderTurnStartSuppressed(state)) {
+          return [];
+        }
         const turnId = args.ensureTurnStarted({
           events,
           state,
@@ -654,7 +673,9 @@ export function translateClaudeSdkMessage(
 
       const taskEvents = translateClaudeTaskMessage({
         ensureTurnStarted: () =>
-          args.ensureTurnStarted({ events, state, threadId }),
+          isClaudeProviderTurnStartSuppressed(state)
+            ? undefined
+            : args.ensureTurnStarted({ events, state, threadId }),
         event: args.event,
         now: Date.now(),
         opaqueTaskIds: state.opaqueTaskIds,
@@ -679,6 +700,9 @@ export function translateClaudeSdkMessage(
         });
       }
       const message = parsedMessage.data;
+      if (isClaudeProviderTurnStartSuppressed(state)) {
+        return [];
+      }
       // Sidechain assistant messages belong to subagents/tools, not the root
       // conversation lineage that thread/fork can retain through.
       const providerCheckpointId =
@@ -836,6 +860,9 @@ export function translateClaudeSdkMessage(
         });
       }
       const message = parsedMessage.data;
+      if (isClaudeProviderTurnStartSuppressed(state)) {
+        return [];
+      }
       const reasoningDelta = extractStreamThinkingDelta(message);
       if (reasoningDelta) {
         const turnId = args.ensureTurnStarted({
@@ -1030,6 +1057,7 @@ export function translateClaudeSdkMessage(
               }
             : {}),
         });
+        state.suppressUnacceptedTurnStart = failed;
         args.turnState.finishTurn({ state, threadId: stateKey });
       }
       break;
@@ -1060,6 +1088,10 @@ export function translateClaudeSdkMessage(
         ) {
           state.pendingHardRateLimitRejection = undefined;
         }
+        return events;
+      }
+      if (isClaudeProviderTurnStartSuppressed(state)) {
+        events.push(rateLimitsEvent);
         return events;
       }
       const turnId = args.ensureTurnStarted({ events, state, threadId });

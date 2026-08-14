@@ -4363,6 +4363,129 @@ describe("claude-code provider adapter", () => {
     );
   });
 
+  it("does not open a provider-only turn while a failed turn's subagent drains", () => {
+    const adapter = createClaudeCodeProviderAdapter();
+    const context = { threadId: "bb-thread-rate-limited" };
+    adapter.translateAcceptedCommand({
+      command: {
+        type: "turn/start",
+        threadId: context.threadId,
+        providerThreadId: "claude-session-1",
+        clientRequestId: "creq_23456789af",
+        input: [promptTextInput({ text: "Finish the task" })],
+        options: fullProviderExecutionContext,
+      },
+    });
+    adapter.translateEvent(loadFixture("task-started-subagent.json"), context);
+    adapter.translateEvent(
+      {
+        type: "rate_limit_event",
+        rate_limit_info: {
+          status: "rejected",
+          rateLimitType: "five_hour",
+          resetsAt: 12345,
+        },
+        session_id: "claude-session-1",
+      },
+      context,
+    );
+
+    const failed = adapter.translateEvent(
+      {
+        type: "result",
+        subtype: "error_during_execution",
+        is_error: true,
+        api_error_status: 429,
+        result: "You've hit your session limit",
+        usage: {},
+        modelUsage: {},
+        session_id: "claude-session-1",
+      },
+      context,
+    );
+    expect(failed).toContainEqual(
+      expect.objectContaining({
+        type: "turn/completed",
+        scope: turnScope("turn-1"),
+        status: "failed",
+      }),
+    );
+
+    const taskCompleted = adapter.translateEvent(
+      loadFixture("task-notification-subagent.json"),
+      context,
+    );
+    expect(taskCompleted).toContainEqual(
+      expect.objectContaining({ type: "item/backgroundTask/completed" }),
+    );
+    const trailingSidechain = adapter.translateEvent(
+      {
+        type: "assistant",
+        message: {
+          id: "late-subagent-message",
+          role: "assistant",
+          content: [{ type: "text", text: "Late subagent output" }],
+        },
+        session_id: "claude-session-1",
+      },
+      {
+        ...context,
+        parentToolCallId: "toolu_01W1cLr7AsTRvbya9LM5LSAV",
+      },
+    );
+
+    expect(trailingSidechain).toEqual([]);
+    expect(
+      adapter.translateEvent(
+        {
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          session_id: "claude-session-1",
+        },
+        context,
+      ),
+    ).toEqual([]);
+
+    adapter.translateAcceptedCommand({
+      command: {
+        type: "turn/start",
+        threadId: context.threadId,
+        providerThreadId: "claude-session-1",
+        clientRequestId: "creq_23456789ad",
+        input: [promptTextInput({ text: "A genuine follow-up" })],
+        options: fullProviderExecutionContext,
+      },
+    });
+    expect(
+      adapter.translateEvent(
+        {
+          type: "assistant",
+          message: {
+            id: "follow-up-message",
+            role: "assistant",
+            content: [{ type: "text", text: "Working again" }],
+          },
+          session_id: "claude-session-1",
+        },
+        context,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        type: "turn/started",
+        scope: turnScope("turn-2"),
+      }),
+      expect.objectContaining({
+        type: "turn/input/accepted",
+        clientRequestId: "creq_23456789ad",
+      }),
+      expect.objectContaining({
+        type: "item/completed",
+        scope: turnScope("turn-2"),
+      }),
+    ]);
+  });
+
   it("translateEvent emits failed status for error result", () => {
     const adapter = createClaudeCodeProviderAdapter();
     // Start a turn
