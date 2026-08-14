@@ -3052,6 +3052,64 @@ describe("claude-code provider adapter", () => {
     ]);
   });
 
+  it("does not open a provider-only turn for a bridge error after terminal failure", () => {
+    const adapter = createClaudeCodeProviderAdapter();
+    const context = { threadId: "bb-thread-bridge-error-drain" };
+    adapter.translateAcceptedCommand({
+      command: {
+        type: "turn/start",
+        threadId: context.threadId,
+        providerThreadId: "claude-session-1",
+        clientRequestId: "creq_23456789bg",
+        input: [promptTextInput({ text: "Finish the task" })],
+        options: fullProviderExecutionContext,
+      },
+    });
+    adapter.translateEvent(
+      {
+        type: "assistant",
+        message: {
+          id: "assistant-before-failure",
+          role: "assistant",
+          content: [{ type: "text", text: "Working" }],
+        },
+        session_id: "claude-session-1",
+      },
+      context,
+    );
+    expect(
+      adapter.translateEvent(
+        {
+          type: "result",
+          subtype: "error_during_execution",
+          is_error: true,
+          result: "Usage limit reached",
+          usage: {},
+          modelUsage: {},
+          session_id: "claude-session-1",
+        },
+        context,
+      ),
+    ).toContainEqual(
+      expect.objectContaining({
+        type: "turn/completed",
+        scope: turnScope("turn-1"),
+        status: "failed",
+      }),
+    );
+
+    expect(
+      adapter.translateEvent(
+        {
+          jsonrpc: "2.0",
+          method: "error",
+          params: { message: "Late SDK stream failure" },
+        },
+        context,
+      ),
+    ).toEqual([]);
+  });
+
   it("translateEvent marks Claude result events with is_error as failed", () => {
     const adapter = createClaudeCodeProviderAdapter();
 

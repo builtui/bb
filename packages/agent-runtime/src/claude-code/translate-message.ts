@@ -447,7 +447,9 @@ function resolveClaudeActiveTurnId(
   return args.turnState.get({ threadId: args.context.threadId })?.currentTurnId;
 }
 
-function isClaudeProviderTurnStartSuppressed(state: ClaudeTurnState): boolean {
+export function isClaudeProviderTurnStartSuppressed(
+  state: ClaudeTurnState,
+): boolean {
   return (
     state.suppressUnacceptedTurnStart &&
     state.currentTurnId === undefined &&

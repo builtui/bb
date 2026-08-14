@@ -113,6 +113,7 @@ import {
   resolveClaudeModelContextWindowHint,
 } from "./sdk-extraction.js";
 import {
+  isClaudeProviderTurnStartSuppressed,
   translateClaudeSdkMessage,
   type ClaudeToolResultTranslationInput,
   type ClaudeToolUseTranslationInput,
@@ -798,6 +799,12 @@ export function createClaudeCodeProviderAdapter(
 
     const errorEnvelope = errorEnvelopeSchema.safeParse(event);
     if (errorEnvelope.success) {
+      const state = context?.threadId
+        ? turnState.get({ threadId: context.threadId })
+        : undefined;
+      if (state && isClaudeProviderTurnStartSuppressed(state)) {
+        return [];
+      }
       return turnState.buildErrorEvents({
         contextThreadId: context?.threadId,
         detail: errorEnvelope.data.params?.message ?? "unknown error",
