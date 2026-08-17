@@ -15,6 +15,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { useAtomValue } from "jotai";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import {
   ContextMenu,
@@ -93,6 +94,7 @@ import {
   rewriteLocalhostLinkHref,
   useRewriteLocalhostLinksPreference,
 } from "@/lib/localhost-link-rewrite-preference";
+import { markdownTableBreakoutPreferenceAtom } from "@/lib/markdown-table-breakout-preference";
 import { resolveRouteHref } from "@/lib/route-paths";
 import { cn } from "@bb/shared-ui/lib/utils";
 import remarkDirective from "remark-directive";
@@ -930,7 +932,18 @@ function MarkdownBlockquote({ children }: MarkdownBlockquoteProps) {
 }
 
 function MarkdownTable({ children }: MarkdownTableProps) {
+  const breakoutEnabled = useAtomValue(markdownTableBreakoutPreferenceAtom);
   const breakoutRef = useMarkdownTableContentWidthVariable();
+
+  // Preference OFF: stay inside the text column and scroll horizontally there.
+  // `breakoutRef` goes unused, so its layout effect finds no node and bails.
+  if (!breakoutEnabled) {
+    return (
+      <div className="my-2 w-full overflow-x-auto">
+        <table className="border border-border">{children}</table>
+      </div>
+    );
+  }
 
   return (
     <div

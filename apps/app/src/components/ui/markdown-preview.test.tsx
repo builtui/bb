@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createStore, Provider as JotaiProvider } from "jotai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { markdownTableBreakoutPreferenceAtom } from "@/lib/markdown-table-breakout-preference";
 import { MarkdownPreview } from "./markdown-preview";
 import {
   MarkdownLocalFileContextMenuContext,
@@ -66,6 +68,38 @@ describe("MarkdownPreview", () => {
     expect(observed).toHaveLength(1);
     expect(observed[0]?.hasAttribute("data-markdown-preview")).toBe(true);
     expect(breakout?.style.getPropertyValue("--md-content-w")).toBe("320px");
+  });
+
+  it("keeps a table inside the content width when breakout is off", () => {
+    const observed: Element[] = [];
+    class ResizeObserverMock {
+      constructor(_callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        observed.push(target);
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
+
+    const store = createStore();
+    store.set(markdownTableBreakoutPreferenceAtom, false);
+    const { container } = render(
+      <JotaiProvider store={store}>
+        <MarkdownPreview content={"| A |\n| - |\n| B |"} />
+      </JotaiProvider>,
+    );
+
+    const wrapper = container.querySelector("table")?.parentElement;
+
+    // One wrapper instead of the breakout pair, so no negative margins escape
+    // the text column — and no content width to measure.
+    expect(wrapper?.className).toContain("overflow-x-auto");
+    expect(wrapper?.style.width).toBe("");
+    expect(wrapper?.parentElement?.hasAttribute("data-markdown-preview")).toBe(
+      true,
+    );
+    expect(observed).toHaveLength(0);
   });
 
   it("keeps the starting number of an ordered list", () => {
